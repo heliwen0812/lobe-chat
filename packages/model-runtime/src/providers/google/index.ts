@@ -51,6 +51,12 @@ const modelsDisableInstuction = new Set([
   'gemma-3n-e4b-it',
 ]);
 
+// Add a set of models that are known *not* to work with Google Search
+const modelsWithoutSearch = new Set([
+  // Add models here that you know don't work with Google Search
+  // Example: 'model-without-search'
+]);
+
 export interface GoogleModelCard {
   displayName: string;
   inputTokenLimit: number;
@@ -486,28 +492,31 @@ export class LobeGoogleAI implements LobeRuntimeAI {
     payload?: ChatStreamPayload,
   ): GoogleFunctionCallTool[] | undefined {
     const hasToolCalls = payload?.messages?.some((m) => m.tool_calls?.length);
-    const hasSearch = payload?.enabledSearch;
     const hasUrlContext = payload?.urlContext;
-    const hasFunctionTools = tools && tools.length > 0;
+    const model = payload?.model;
 
-    // 如果已经有 tool_calls，优先处理 function declarations
-    if (hasToolCalls && hasFunctionTools) {
+    // If the model is in the blacklist, don't add search
+    if (model && modelsWithoutSearch.has(model)) {
+      return this.buildFunctionDeclarations(tools); // Just return function declarations if they exist.
+    }
+
+    // If there are tool_calls, prioritize function declarations.
+    if (hasToolCalls && tools && tools.length > 0) {
       return this.buildFunctionDeclarations(tools);
     }
 
-    // 构建并返回搜索相关工具（搜索工具不能与 FunctionCall 同时使用）
-    if (hasUrlContext && hasSearch) {
-      return [{ urlContext: {} }, { googleSearch: {} }];
+    // Otherwise, if there are function tools, don't add search.
+    if (tools && tools.length > 0) {
+      return this.buildFunctionDeclarations(tools);
     }
-    if (hasUrlContext) {
-      return [{ urlContext: {} }];
-    }
-    if (hasSearch) {
+
+    // If no tool_calls and no function tools, add search if no URL context is provided
+    if (!hasUrlContext) {
       return [{ googleSearch: {} }];
     }
 
-    // 最后考虑 function declarations
-    return this.buildFunctionDeclarations(tools);
+    // If URL context is provided, return the URL context tool.
+    return [{ urlContext: {} }];
   }
 
   private buildFunctionDeclarations(
